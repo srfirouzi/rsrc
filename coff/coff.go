@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akavel/rsrc/binutil"
+	"github.com/srfirouzi/rsrc/binutil"
 )
 
 type Dir struct { // struct IMAGE_RESOURCE_DIRECTORY

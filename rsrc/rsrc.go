@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/akavel/rsrc/binutil"
-	"github.com/akavel/rsrc/coff"
-	"github.com/akavel/rsrc/ico"
-	"github.com/akavel/rsrc/internal"
+	"github.com/srfirouzi/rsrc/binutil"
+	"github.com/srfirouzi/rsrc/coff"
+	"github.com/srfirouzi/rsrc/ico"
+	"github.com/srfirouzi/rsrc/internal"
 )
 
 // on storing icons, see: http://blogs.msdn.com/b/oldnewthing/archive/2012/07/20/10331787.aspx
@@ -28,10 +28,40 @@ type _GRPICONDIRENTRY struct {
 	Id uint16
 }
 
+func EmbedRCFile(rc *RCFile) error {
+	out := coff.NewRSRC()
+	err := out.Arch(rc.Arch)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(rc.Items); i++ {
+		item := rc.Items[i]
+		if item.Mode == "MANIFEST" {
+			manifest, err := binutil.SizedOpen(item.FileName)
+			if err != nil {
+				return fmt.Errorf("rsrc: error opening manifest file '%s': %s", item.FileName, err)
+			}
+			defer manifest.Close()
+			out.AddResource(coff.RT_MANIFEST, item.ID, manifest)
+			fmt.Println("Manifest ID: ", item.ID)
+		}
+		if item.Mode == "ICON" {
+			f, err := addIcon(out, item.FileName, item.ID)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+		}
+
+	}
+	out.Freeze()
+
+	return internal.Write(out, rc.FileOutput)
+}
 func Embed(fnameout, arch, fnamein, fnameico string) error {
 	lastid := uint16(0)
 	newid := func() uint16 {
-		lastid++
+		lastid = lastid + 100
 		return lastid
 	}
 
@@ -51,11 +81,12 @@ func Embed(fnameout, arch, fnamein, fnameico string) error {
 		id := newid()
 		out.AddResource(coff.RT_MANIFEST, id, manifest)
 		// TODO(akavel): reintroduce the Printlns in package main after Embed returns
-		// fmt.Println("Manifest ID: ", id)
+		fmt.Println("Manifest ID: ", id)
 	}
 	if fnameico != "" {
 		for _, fnameicosingle := range strings.Split(fnameico, ",") {
-			f, err := addIcon(out, fnameicosingle, newid)
+			id := newid()
+			f, err := addIcon(out, fnameicosingle, id)
 			if err != nil {
 				return err
 			}
@@ -68,7 +99,7 @@ func Embed(fnameout, arch, fnamein, fnameico string) error {
 	return internal.Write(out, fnameout)
 }
 
-func addIcon(out *coff.Coff, fname string, newid func() uint16) (io.Closer, error) {
+func addIcon(out *coff.Coff, fname string, newid uint16) (io.Closer, error) {
 	f, err := os.Open(fname)
 	if err != nil {
 		return nil, err
@@ -87,16 +118,20 @@ func addIcon(out *coff.Coff, fname string, newid func() uint16) (io.Closer, erro
 			Type:     1, // magic num.
 			Count:    uint16(len(icons)),
 		}}
+		id := newid
+		newid++
+
 		for _, icon := range icons {
-			id := newid()
+			id2 := newid
+			newid++
 			r := io.NewSectionReader(f, int64(icon.ImageOffset), int64(icon.BytesInRes))
-			out.AddResource(coff.RT_ICON, id, r)
-			group.Entries = append(group.Entries, _GRPICONDIRENTRY{icon.IconDirEntryCommon, id})
+			out.AddResource(coff.RT_ICON, id2, r)
+			group.Entries = append(group.Entries, _GRPICONDIRENTRY{icon.IconDirEntryCommon, id2})
 		}
-		id := newid()
+
 		out.AddResource(coff.RT_GROUP_ICON, id, group)
 		// TODO(akavel): reintroduce the Printlns in package main after Embed returns
-		// fmt.Println("Icon ", fname, " ID: ", id)
+		fmt.Println("Icon (", fname, ") ID: ", id)
 	}
 
 	return f, nil
